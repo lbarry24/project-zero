@@ -1,33 +1,81 @@
-document.getElementById("fetchData").addEventListener("click", function() {
-    fetch("https://images-api.nasa.gov/search?media_type=image&q=Saturn")
-        .then(response => response.json()) // Convert response to JSON
-        .then(data => {
-            let items = data.collection.items; // Get the array of results
-            if (items.length > 0) {
-                let firstItem = items[0]; // Get the first item
-                let title = firstItem.data[0].title; // Get the title of the first result
+class LinkPreviewCard extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+        this.apiUrl = "https://open-apis.hax.cloud/api/services/website/metadata?q=";
+        this.state = {
+            loading: true,
+            error: false,
+            metadata: null,
+        };
+    }
 
-                // Check if there is a link to the image in the API response
-                let imageUrl = firstItem.links ? firstItem.links[0].href : ""; // Get the image URL from the links array
+    static get observedAttributes() {
+        return ["href"];
+    }
 
-                // If an image URL is available, display it
-                if (imageUrl) {
-                    document.getElementById("output").innerHTML = `
-                        <h2>${title}</h2>
-                        <img src="${imageUrl}" alt="NASA Image" />
-                    `;
-                } else {
-                    document.getElementById("output").innerHTML = `
-                        <h2>${title}</h2>
-                        <p>No image available.</p>
-                    `;
-                }
+    attributeChangedCallback(name, oldValue, newValue) {
+        if (name === "href" && newValue) {
+            this.fetchMetadata(newValue);
+        }
+    }
+
+    async fetchMetadata(url) {
+        this.state.loading = true;
+        this.update();
+
+        try {
+            const response = await fetch(`${this.apiUrl}${encodeURIComponent(url)}`);
+            const json = await response.json();
+            if (json.status === 200 && json.data) {
+                this.state.metadata = json.data;
+                this.state.error = false;
             } else {
-                document.getElementById("output").innerHTML = "No results found.";
+                this.state.error = true;
             }
-        })
-        .catch(error => {
-            console.log("Oops! Something went wrong:", error);
-            document.getElementById("output").innerHTML = "Error fetching data.";
-        });
-});
+        } catch (error) {
+            this.state.error = true;
+        }
+
+        this.state.loading = false;
+        this.update();
+    }
+
+    getThemeColor(url) {
+        if (url.includes("psu.edu")) return "var(--psu-theme)";
+        return "var(--default-theme)";
+    }
+
+    update() {
+        const { loading, error, metadata } = this.state;
+        const themeColor = metadata?.["theme-color"] || this.getThemeColor(this.getAttribute("href"));
+
+        this.shadowRoot.innerHTML = `
+            <style>
+                @import url('style.css');
+                .card { border-left-color: ${themeColor}; }
+                .title { color: ${themeColor}; }
+            </style>
+            ${loading ? `<div class="loading">Loading...</div>` : ""}
+            ${error ? `<div class="loading">No preview available</div>` : ""}
+            ${metadata ? `
+                <div class="card">
+                    ${metadata["og:image"] ? `<img class="image" src="${metadata["og:image"]}" alt="Preview">` : ""}
+                    <div class="content">
+                        <div class="title">${metadata["og:title"] || "No Title"}</div>
+                        <div class="description">${metadata["og:description"] || "No description available."}</div>
+                        <a class="link" href="${metadata.url}" target="_blank">${metadata.url}</a>
+                    </div>
+                </div>
+            ` : ""}
+        `;
+    }
+
+    connectedCallback() {
+        const url = this.getAttribute("href");
+        if (url) this.fetchMetadata(url);
+    }
+}
+
+customElements.define("link-preview-card", LinkPreviewCard);
+
